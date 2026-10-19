@@ -1,0 +1,223 @@
+// Ported from the Next.js project (hospital-mangmeant-system/prisma/schema.prisma).
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+// ─────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  RECEPTIONIST
+  DOCTOR
+}
+
+enum Gender {
+  MALE
+  FEMALE
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+enum AdmissionStatus {
+  ADMITTED
+  DISCHARGED
+}
+
+// ─────────────────────────────────────────────
+// Accounts & roles
+// ─────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  doctor Doctor? // present only when role = DOCTOR
+
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────
+// Departments
+// ─────────────────────────────────────────────
+
+model Department {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+
+  doctors      Doctor[]
+  appointments Appointment[]
+  admissions   Admission[]
+
+  @@map("departments")
+}
+
+// ─────────────────────────────────────────────
+// Doctors
+// ─────────────────────────────────────────────
+
+model Doctor {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  specialization String
+  departmentId   String
+  createdAt      DateTime @default(now())
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department    Department     @relation(fields: [departmentId], references: [id])
+  appointments  Appointment[]
+  consultations Consultation[]
+  admissions    Admission[]
+
+  @@map("doctors")
+}
+
+// ─────────────────────────────────────────────
+// Patients
+// ─────────────────────────────────────────────
+
+model Patient {
+  id          String   @id @default(cuid())
+  fullName    String
+  gender      Gender
+  dateOfBirth DateTime
+  phone       String
+  address     String?
+  bloodType   String?
+  createdAt   DateTime @default(now())
+
+  appointments  Appointment[]
+  consultations Consultation[]
+  admissions    Admission[]
+
+  @@map("patients")
+}
+
+// ─────────────────────────────────────────────
+// Appointments
+// ─────────────────────────────────────────────
+
+model Appointment {
+  id           String            @id @default(cuid())
+  patientId    String
+  doctorId     String
+  departmentId String
+  scheduledAt  DateTime
+  status       AppointmentStatus @default(PENDING)
+  reason       String?
+  createdAt    DateTime          @default(now())
+
+  patient      Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor       Doctor        @relation(fields: [doctorId], references: [id])
+  department   Department    @relation(fields: [departmentId], references: [id])
+  consultation Consultation?
+
+  @@map("appointments")
+}
+
+// ─────────────────────────────────────────────
+// Consultations
+// ─────────────────────────────────────────────
+
+model Consultation {
+  id            String   @id @default(cuid())
+  appointmentId String   @unique
+  patientId     String
+  doctorId      String
+  diagnosis     String?
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  appointment   Appointment        @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  patient       Patient            @relation(fields: [patientId], references: [id])
+  doctor        Doctor             @relation(fields: [doctorId], references: [id])
+  prescriptions PrescriptionItem[]
+
+  @@map("consultations")
+}
+
+// ─────────────────────────────────────────────
+// Admissions
+// ─────────────────────────────────────────────
+
+model Admission {
+  id            String          @id @default(cuid())
+  patientId     String
+  doctorId      String
+  departmentId  String
+  admitDate     DateTime        @default(now())
+  dischargeDate DateTime?
+  status        AdmissionStatus @default(ADMITTED)
+  reason        String?
+
+  patient    Patient    @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor     Doctor     @relation(fields: [doctorId], references: [id])
+  department Department @relation(fields: [departmentId], references: [id])
+
+  @@map("admissions")
+}
+
+// ─────────────────────────────────────────────
+// Pharmacy
+// ─────────────────────────────────────────────
+
+model MedicineCategory {
+  id   String @id @default(cuid())
+  name String @unique
+
+  medicines Medicine[]
+
+  @@map("medicine_categories")
+}
+
+model Medicine {
+  id                String   @id @default(cuid())
+  name              String
+  categoryId        String
+  quantity          Int      @default(0)
+  unit              String? // e.g. box, strip, bottle
+  price             Decimal  @db.Decimal(10, 2)
+  expiryDate        DateTime
+  lowStockThreshold Int      @default(10)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  category      MedicineCategory   @relation(fields: [categoryId], references: [id])
+  prescriptions PrescriptionItem[]
+
+  @@map("medicines")
+}
+
+// Links a consultation to the medicines prescribed in it.
+model PrescriptionItem {
+  id             String  @id @default(cuid())
+  consultationId String
+  medicineId     String
+  quantity       Int
+  dosage         String? // e.g. "1 tablet twice daily"
+
+  consultation Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+  medicine     Medicine     @relation(fields: [medicineId], references: [id])
+
+  @@map("prescription_items")
+}
