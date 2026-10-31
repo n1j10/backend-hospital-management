@@ -31,7 +31,7 @@ test("register: rejects an unknown role", () => {
   const result = registerSchema.safeParse({
     name: "Ali",
     email: "ali@hospital.com",
-    password: "secret1",
+    password: "secret123",
     role: "NURSE",
   });
 
@@ -91,4 +91,28 @@ test("prescription: quantity must be at least 1", () => {
   });
 
   assert.equal(result.success, false);
+});
+
+test("register: rejects a password shorter than 8 characters", () => {
+  const result = registerSchema.safeParse({
+    name: "Ali",
+    email: "ali@hospital.com",
+    password: "secret1",
+    role: "DOCTOR",
+  });
+
+  assert.equal(result.success, false);
+  assert.equal(result.error.issues[0].message, "Password must be at least 8 characters");
+});
+
+test("register: normalizes the email", () => {
+  const result = registerSchema.safeParse({
+    name: "Ali",
+    email: "  Ali@Hospital.COM ",
+    password: "secret123",
+    role: "DOCTOR",
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.data.email, "ali@hospital.com");
 });

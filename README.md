@@ -1,49 +1,129 @@
-# Hospital Management API (Express)
+<div align="center">
 
-REST API ported from the Next.js server actions in
-[`utils/actions`](https://github.com/n1j10/hospital-mangmeant-system/tree/main/utils/actions).
-The Prisma schema and the Zod schemas come from the same repo.
+# 🏥 Hospital Management API
 
-## Layers
+**A layered, role-based REST API for running a hospital: departments, doctors, patients,
+appointments, consultations, admissions, pharmacy stock and prescriptions.**
+
+![Node.js](https://img.shields.io/badge/Node.js-Express%204-339933?logo=nodedotjs&logoColor=white)
+![Prisma](https://img.shields.io/badge/Prisma-6-2d3748?logo=prisma)
+![PostgreSQL](https://img.shields.io/badge/Neon-Postgres%20serverless-00e599?logo=postgresql&logoColor=white)
+![JWT](https://img.shields.io/badge/Auth-JWT%20%2B%20RBAC-000?logo=jsonwebtokens)
+![Zod](https://img.shields.io/badge/Validation-Zod-3068b7?logo=zod)
+![S3](https://img.shields.io/badge/Storage-S3%20presigned%20URLs-569a31?logo=amazons3&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-node%3Atest-5fa04e?logo=nodedotjs&logoColor=white)
+
+</div>
+
+---
+
+## Overview
+
+This API is the backend of a hospital management system. It was ported from a Next.js Server-Actions
+monolith into a standalone service with **strict separation of concerns**:
 
 ```
-routes  ->  middlewares (auth / validate)  ->  controllers  ->  services  ->  models  ->  Prisma
+routes  →  middlewares (authenticate · authorize · validate · rateLimit)  →  controllers  →  services  →  models  →  Prisma
 ```
 
-- **routes** – URLs, roles and validation only.
-- **controllers** – read `req`, call a service, send the response. No business logic.
-- **services** – the logic ported from the actions (plus checks: the doctor belongs to the department, a patient can't be admitted twice, ...).
-- **models** – every Prisma query lives here, so no controller touches the database directly.
-- **validations** – the Zod schemas from `utils/schema.ts`.
+| Layer | Responsibility |
+| --- | --- |
+| **routes** | URL, allowed roles, and the validation schema. Nothing else |
+| **middlewares** | JWT verification, RBAC, Zod validation, rate limiting, central error handling |
+| **controllers** | Read `req`, call one service, shape the response. No business logic |
+| **services** | Business rules, e.g. a doctor must belong to the department and a patient can't be admitted twice |
+| **models** | Every Prisma query lives here, and nothing else touches the DB |
+| **validations** | Zod schemas shared with the original frontend |
 
-## Setup
+## Domain
+
+```mermaid
+erDiagram
+    Department ||--o{ Doctor : employs
+    User ||--o| Doctor : "is (role DOCTOR)"
+    Patient ||--o{ Appointment : books
+    Doctor ||--o{ Appointment : attends
+    Appointment ||--o| Consultation : produces
+    Consultation ||--o{ PrescriptionItem : prescribes
+    Medicine ||--o{ PrescriptionItem : "is dispensed in"
+    MedicineCategory ||--o{ Medicine : groups
+    Patient ||--o{ Admission : "is admitted"
+    Department ||--o{ Admission : hosts
+```
+
+**Roles:** `ADMIN` · `RECEPTIONIST` · `DOCTOR`.
+**Highlights:** a live dashboard (stats, notifications, recent appointments), low-stock and
+expiring-medicine alerts, appointment status workflow, admission / discharge, and secure file storage
+through S3 **presigned URLs**.
+
+## Security
+
+| Concern | Implementation |
+| --- | --- |
+| Passwords | `bcrypt` (cost 10), 8–72 chars (bcrypt's real input limit), never returned by any query |
+| Tokens | JWT `HS256` pinned on both sign and verify, so algorithm-confusion attacks don't work. The signing secret length is checked in production |
+| Authorization | `authenticate` + `authorize(...roles)` per route. Destructive operations are admin-only |
+| Privilege escalation | Public registration can never create an `ADMIN`. It can be closed entirely with `ALLOW_SELF_REGISTRATION=false` |
+| Brute force | IP rate limiting on `/auth/login` and `/auth/register` (10 attempts / 15 min, standard `RateLimit-*` headers) |
+| User enumeration | Constant-time login: unknown emails still run a bcrypt compare |
+| Input | Every body and query is parsed with Zod, unknown keys are stripped, emails are normalised |
+| Uploads | Server-generated UUID keys (the client filename is never trusted), content-type allow-list (no HTML/SVG), 10 MB cap, path-traversal guard on keys |
+| Transport | `helmet` headers, configurable CORS allow-list (`CORS_ORIGIN`), 1 MB JSON body cap |
+| Errors | One error handler. Prisma codes map to 404/409, and 5xx details are hidden in production |
+
+## Getting started
 
 ```bash
+git clone https://github.com/n1j10/backend-hospital-management.git
+cd backend-hospital-management
 npm install
-cp .env.example .env     # then set DATABASE_URL and JWT_SECRET
-npx prisma migrate dev --name init
-npm run seed             # optional: demo data, every password is "password123"
-npm run dev
+cp .env.example .env              # set DATABASE_URL, JWT_SECRET, storage keys
+npx prisma migrate deploy
+npm run seed                      # optional demo data
+npm run dev                       # http://localhost:5000/api/health
 ```
 
 Seeded accounts: `admin@hospital.com` (ADMIN), `reception@hospital.com` (RECEPTIONIST),
-`ali@hospital.com` / `sara@hospital.com` / ... (DOCTOR).
+`ali@hospital.com`, `sara@hospital.com`, … (DOCTOR). The demo password for all of them is in `prisma/seed.js`.
 
-## Auth
+### Environment variables
 
-The Next.js app saved a JWT in the `auth-token` cookie. Here `login` returns the token and
-every protected request sends it as a header:
+| Variable | Required | Description |
+| --- | :---: | --- |
+| `DATABASE_URL` | ✅ | Postgres connection string (Neon serverless adapter) |
+| `JWT_SECRET` | ✅ | ≥ 32 random chars |
+| `JWT_EXPIRES_IN` | ➖ | Default `7d` |
+| `AWS_ENDPOINT_URL_S3`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | ✅ | S3-compatible storage |
+| `AWS_REGION`, `AWS_BUCKET` | ➖ | Defaults `us-east-1`, `default-bucket` |
+| `CORS_ORIGIN` | ➖ | Comma-separated allowed origins (empty = any) |
+| `ALLOW_SELF_REGISTRATION` | ➖ | `false` closes public sign-up (default `true`) |
 
-```
+### Scripts
+
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Nodemon dev server |
+| `npm start` | Production server |
+| `npm test` | Unit tests (`node:test`, no extra dependency) |
+| `npm run seed` | Seed demo data |
+| `npm run prisma:migrate` | Create / apply a migration |
+
+## API
+
+Authenticate with `POST /api/auth/login`, then send the token on every request:
+
+```http
 Authorization: Bearer <token>
 ```
 
-Logout is done on the client by deleting the token. Passwords are hashed with bcrypt
-(the Next.js app used sha256). Public `register` cannot create `ADMIN` accounts.
+Every response uses the same envelope:
 
-## Endpoints
+```json
+{ "success": true,  "message": "Success", "data": {} }
+{ "success": false, "message": "Patient not found" }
+```
 
-`user` = any logged-in role (ADMIN, RECEPTIONIST, DOCTOR).
+`user` = any logged-in role.
 
 | Method | Path | Auth | Ported from |
 | --- | --- | --- | --- |
@@ -98,11 +178,13 @@ Logout is done on the client by deleting the token. Passwords are hashed with bc
 | POST | `/api/prescriptions` | user | `addPrescriptionItemAction` |
 | DELETE | `/api/prescriptions/:id` | user | `removePrescriptionItemAction` |
 
-Every response has the same shape:
+**Storage** (`user`): `POST /api/storage/upload` (raw body, `?filename=&folder=`),
+`POST /api/storage/upload-url`, `GET /api/storage/download-url?key=`, `DELETE /api/storage?key=`.
 
-```json
-{ "success": true, "message": "Success", "data": {} }
-{ "success": false, "message": "Patient not found" }
-```
+---
 
-Where an action used `redirect()` for a missing record, the API returns `404`.
+<div align="center">
+
+Built by **[n1j10](https://github.com/n1j10)**
+
+</div>

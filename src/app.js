@@ -8,10 +8,15 @@ const { notFound, errorHandler } = require("./middlewares/error.middleware");
 
 const app = express();
 
+// Behind Vercel's proxy: needed so req.ip is the real client (rate limiting).
+app.set("trust proxy", 1);
+
 app.use(helmet());
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// CORS_ORIGIN="https://a.com,https://b.com" restricts browsers to known frontends; unset = any origin.
+// Auth uses a Bearer header (no cookies), so an open origin can't be abused for CSRF.
+app.use(cors({ origin: config.corsOrigins.length ? config.corsOrigins : "*" }));
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 if (config.env === "development") app.use(morgan("dev"));
 
 app.use("/api", routes);

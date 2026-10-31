@@ -30,7 +30,11 @@ const errorHandler = (error, req, res, next) => {
     message = "This record is linked to other records and cannot be changed or deleted";
   }
 
-  if (statusCode === 500) console.error(error);
+  if (statusCode >= 500) {
+    console.error(error);
+    // unexpected errors can carry internals (SQL, file paths, hostnames): hide them in production
+    if (config.env === "production") message = "Internal server error";
+  }
 
   res.status(statusCode).json({
     success: false,
