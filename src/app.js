@@ -14,6 +14,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 if (config.env === "development") app.use(morgan("dev"));
 
+app.get("/", (req, res) => res.json({ status: "ok", message: "Hospital Management API" }));
 app.use("/api", routes);
 
 app.use(notFound);
